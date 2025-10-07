@@ -5,6 +5,7 @@ import type {
   IDatasource,
   IGetRowsParams,
   GridReadyEvent,
+  CellValueChangedEvent,
 } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
@@ -31,12 +32,20 @@ function Table() {
         sortable: true,
         filter: "agTextColumnFilter",
         floatingFilter: true,
+        editable: true,
       },
       {
         field: "age",
         sortable: true,
         filter: "agNumberColumnFilter",
         floatingFilter: true,
+        editable: true,
+        cellEditor: "agNumberCellEditor", // Numeric editor
+        cellEditorParams: {
+          min: 0,
+          max: 120,
+          precision: 0,
+        },
       },
     ],
     []
@@ -52,7 +61,6 @@ function Table() {
         try {
           const queryParams = new URLSearchParams();
 
-          // Pagination
           const startRow = params.startRow;
           const endRow = params.endRow;
           const page = Math.floor(startRow / pageSize);
@@ -60,19 +68,15 @@ function Table() {
           queryParams.append("page", page.toString());
           queryParams.append("pageSize", pageSize.toString());
 
-          // Sorting
           if (params.sortModel && params.sortModel.length > 0) {
             queryParams.append("sortField", params.sortModel[0].colId);
             queryParams.append("sortOrder", params.sortModel[0].sort);
           }
 
-          // Filtering - ПОПРАВКА ТУК
           if (params.filterModel) {
             Object.keys(params.filterModel).forEach((col) => {
               const filterModel = params.filterModel[col];
-              console.log("Filter model for", col, ":", filterModel);
 
-              // AG-Grid filterModel има структура: { filter: "стойност", filterType: "text", type: "contains" }
               if (
                 filterModel &&
                 filterModel.filter != null &&
@@ -83,7 +87,6 @@ function Table() {
                   filterModel.filter.toString()
                 );
 
-                // Изпращаме и типа на филтъра, ако е нужен
                 if (filterModel.type) {
                   queryParams.append(`filterType_${col}`, filterModel.type);
                 }
@@ -121,6 +124,48 @@ function Table() {
     [datasource]
   );
 
+  const onCellValueChanged = useCallback(
+    async (event: CellValueChangedEvent<User>) => {
+      console.log("Cell value changed:", event);
+
+      const { data, colDef, oldValue, newValue } = event;
+
+      // Ако стойността не се е променила, не правим нищо
+      if (oldValue === newValue) {
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `http://localhost:3001/api/users/${data.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              field: colDef.field,
+              value: newValue,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to update");
+        }
+
+        const result = await response.json();
+        console.log("Update successful:", result);
+      } catch (error) {
+        console.error("Error updating cell:", error);
+        alert("Грешка при запазване!");
+
+        event.node.setDataValue(colDef.field!, oldValue);
+      }
+    },
+    []
+  );
+
   const defaultColDef = useMemo<ColDef>(
     () => ({
       flex: 1,
@@ -144,6 +189,9 @@ function Table() {
           maxBlocksInCache={10}
           pagination={true}
           paginationPageSize={pageSize}
+          onCellValueChanged={onCellValueChanged}
+          singleClickEdit={false}
+          stopEditingWhenCellsLoseFocus={true}
         />
       </div>
       <p>Общо записи: {totalRows}</p>
